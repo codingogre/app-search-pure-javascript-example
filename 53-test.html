@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/html">
+<head>
+    <meta charset="UTF-8">
+    <title>53 Sample Search</title>
+    <script src="https://cdn.jsdelivr.net/npm/@elastic/app-search-javascript@8.9.0/dist/elastic_app_search.umd.js"></script>
+    <style>
+        table.results { width: 100%;}
+        div.searchborder {float: left; padding: 15px;}
+    </style>
+</head>
+<body>
+
+<form id="searchform">
+        <div class="searchborder">
+            <label for="searchbox">Search:</label><br/>
+            <input list="query_suggestions" name="searchbox" id="searchbox" autocomplete="off" style="width: 250px;">
+            <datalist id="query_suggestions"></datalist>
+        </div>
+        <div class="searchborder">
+            <label for="page_num">Page Number:</label><br/>
+            <input type="number" id="page_num" value=1 min="1" max="10000">
+        </div>
+        <div class="searchborder">
+            <label for="num_per_page">Number of Documents:</label><br/>
+            <input type="number" id="num_per_page" value=10 min="1" max="10000">
+        </div>
+        <div class="searchborder" style="clear:both">
+            <button>search</button>
+        </div>
+</form>
+
+<div id="display" hidden=true style="clear:both">
+    <section>
+        <h3>Results:</h3>
+        <table id="results">
+            <tr>
+                <th>Title</th>
+                <th>URL</th>
+                <th>Product Version</th>
+                <th>Score</th>
+            </tr>
+        </table>
+    </section>
+    <section>
+        <h3>Metadata:</h3>
+        <table id="metadata">
+            <tr>
+                <th>current</th>
+                <th>total_pages</th>
+                <th>total_results</th>
+                <th>size</th>
+            </tr>
+        </table>
+    </section>
+</div>
+
+<script>
+
+    // Query suggestor for doing type ahead searching
+    function query_suggester(event) {
+        var input = event.target;
+        listAttrib = input.getAttribute("data-list");
+        if(listAttrib) {
+            input.setAttribute("list", listAttrib);
+            input.removeAttribute("data-list");
+        }
+        var list = document.getElementById("query_suggestions");
+        var min_characters = 0;
+        if (input.value.length < min_characters ) {
+            return;
+        } else {
+            // clear the previous list
+            list.innerHTML = ""
+            // search the "title" field only and return 5 suggestions
+            var options = {
+                "types": {
+                    "documents": {
+                        "fields": [
+                            "title"
+                        ]
+                    }
+                },
+                "size": 5
+            }
+            client
+                .querySuggestion(input.value, options)
+                .then(resultList => {
+                    resultList.results.documents.forEach(result => {
+                        var option = document.createElement('option');
+                        option.value = result.suggestion;
+                        list.appendChild(option);
+                    });
+                })
+                .catch(error => {
+                    console.log(`error: ${error}`);
+                });
+        }
+    }
+
+    // Standard App Search search function.  Has facets thrown in for demonstration purposes
+    function search(event) {
+        event.preventDefault();
+        searchterm = document.getElementById("searchbox");
+
+        var results_table = document.getElementById("results");
+        var metadata_table = document.getElementById("metadata");
+
+        var options = {
+            "page": {
+                // specify the page to return
+                "current": parseInt(document.getElementById("page_num").value),
+                // specify how many documents to return per page
+                "size": parseInt(document.getElementById("num_per_page").value)
+            },
+            "facets": {
+                // facet name
+                "product_version": [
+                    {
+                        // essentially a count, other types include range which will count ranges of values (from->to)
+                        "type": "value",
+                        // aggregation name
+                        "name": "top_three_versions",
+                        "sort": { "count": "desc" },
+                        "size": 3
+                    }
+                ]
+            }
+        };
+
+        client
+            .search(searchterm.value, options)
+            .then(resultList => {
+                resultList.results.forEach(result => {
+                    var row = results_table.insertRow(-1);
+                    var cell1 = row.insertCell(0).innerText = result.getRaw("title");
+                    var cell2 = row.insertCell(1).innerHTML = `<a href="${result.getRaw("url")}">${result.getRaw("url")}</a>`;
+                    var cell3 = row.insertCell(2).innerText = result.getRaw("product_version");
+                    var cell4 = row.insertCell(3).innerText = result.data._meta.score;
+                });
+                var row = metadata_table.insertRow(-1);
+                var cell1 = row.insertCell(0);
+                cell1.innerHTML = `${resultList.rawInfo.meta.page.current}`;
+                var cell2 = row.insertCell(1);
+                cell2.innerHTML = `${resultList.rawInfo.meta.page.total_pages}`;
+                var cell3 = row.insertCell(2);
+                cell3.innerHTML = `${resultList.rawInfo.meta.page.total_results}`;
+                var cell4 = row.insertCell(3);
+                cell4.innerHTML = `${resultList.rawInfo.meta.page.size}`;
+            })
+            .catch(error => {
+                console.log(`error: ${error}`);
+            });
+        document.getElementById("display").hidden = false
+    }
+
+    // Resets all tables to their original state
+    function resetTables(event) {
+        var tables = document.getElementsByTagName("table");
+        for (var i = 0; i < tables.length; i++) {
+            var table = tables[i];
+            console.log(`Table: ${table.id}, Rows: ${table.rows.length}`)
+            var rowCount = table.rows.length;
+            for (var j = rowCount-1; j > 0; j--) {
+                console.log(`Table: ${table.id} Row Number: ${j} deleted`)
+                table.deleteRow(j);
+            }
+        }
+        document.getElementById("display").hidden = true
+    }
+
+    // Create connection to App Search
+    var client = ElasticAppSearch.createClient({
+        searchKey: "search-j7d8qdxreo3gi4589k5s5srb",
+        endpointBase: "https://sandbox.ent.eastus2.azure.elastic-cloud.com",
+        engineName: "elastic-docs-raw"
+    });
+
+    searchbox.addEventListener("keyup", function(event){
+        query_suggester(event)
+    });
+    searchform.addEventListener("submit", function(event){
+        resetTables(event);
+        search(event);
+    });
+
+</script>
+</body>
+</html>
